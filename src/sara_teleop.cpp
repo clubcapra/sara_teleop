@@ -10,52 +10,33 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <controller_manager/controller_manager.h>
 #include <std_msgs/Float64.h>
-#include <std_msgs/String.h>
 #include <control_msgs/GripperCommandActionGoal.h>
-#include <trajectory_msgs/JointTrajectory.h>
 #include <stdio.h>
+#include <algorithm>
 
 #define NBJOINTS 6
 
 
 sensor_msgs::JointState CurArmState;
 ros::Publisher ArmVelCtrlPub;
+ros::Publisher HandCtrlPub;
 bool armDeadmans = false;
 bool HadCallback = false;
 int JointIndex = 0;
-static double FinessePrecision = 0.1;
+static double FinessePrecision[6] = {0.1, 0.05, 0.06, 0.2, 0.15, 0.2}; //Max speed in rad/s
+static double Precision[6] = {0.6, 0.35, 0.45, 1.3, 1.0, 1.3}; //Max speed in rad/s
+static double Acceleration[6] = {0.3, 0.05, 0.08, 2.0, 0.5, 2.0}; //Acceleration in rad/s2
+double LastVel[6] = {0.0}; //Last velocity for acceleration delta calc
 bool buttonsAlreadyPressed[30] = {false};
 double HandState = 0.1;
-double AxisDir = 0.0;
-static double ThumbDeadzone = 0.3;
-
-// trajectory_msgs::JointTrajectory MyTrajectory;
-std::string JointNames[NBJOINTS] = {
-        "ca_joint1", "ca_joint2", "ca_joint3", "ca_joint4", "ca_joint5", "ca_joint6"};
+double Rate = 15; // Refresh Rate
 
 void ArmStateCB(sensor_msgs::JointState State) {
     CurArmState = State;
 }
 
-// COMMENTE CAR PAS DE TRAJECTORY POUR CAPRA
-/* void ToggleArmMode() {
-    // switch arm to trajectory mode or velocity mode
-    controller_manager_msgs::SwitchController msg2;
-    if (ArmMode) {
-        msg2.request.start_controllers.push_back("capra_arm_trajectory_controller");
-        msg2.request.stop_controllers.push_back("capra_arm_velocity_controller");
-    } else {
-        msg2.request.start_controllers.push_back("capra_arm_velocity_controller");
-        msg2.request.stop_controllers.push_back("capra_arm_trajectory_controller");
-    }
-    msg2.request.strictness = 50;
-    Switch.waitForExistence();
-    Switch.call(msg2);
-    ArmMode = !ArmMode;
-} */
-
-/* void HandCtrl(sensor_msgs::JoyPtr joy) {
-    if (joy->buttons[0] && !buttonsAlreadyPressed[0]) {
+void HandCtrl(sensor_msgs::JoyPtr joy) {
+/*     if (joy->buttons[0] && !buttonsAlreadyPressed[0]) {
         if (HandState == 0)
             HandState = 0.1;
         else
@@ -63,30 +44,8 @@ void ArmStateCB(sensor_msgs::JointState State) {
         control_msgs::GripperCommandActionGoal msg;
         msg.goal.command.position = HandState;
         HandCtrlPub.publish(msg);
-    }
-} */
-
-// TODO
-/* void ArmCtrl(sensor_msgs::JoyPtr joy) {
-    if (ArmMode) {
-        std_msgs::Float64MultiArray VelMsg;
-        for (int i = 0; i < NBJOINTS; i++) {
-            double vel = 0;
-            if (i == JointIndex)
-                vel = ((joy->axes[2]) - (joy->axes[5])) * -0.5;
-            VelMsg.data.push_back(vel);
-        }
-        ArmVelCtrlPub.publish(VelMsg);
-        if (joy->buttons[7] && !buttonsAlreadyPressed[7]) {
-            JointIndex++;
-            if (JointIndex >= NBJOINTS) JointIndex = 0;
-        }
-        if (joy->buttons[6] && !buttonsAlreadyPressed[6]) {
-            JointIndex--;
-            if (JointIndex < 0) JointIndex = NBJOINTS - 1;
-        }
-    }
-} */
+    } */
+}
 
 void ArmCtrl(sensor_msgs::JoyPtr joy) {
 
@@ -94,30 +53,18 @@ void ArmCtrl(sensor_msgs::JoyPtr joy) {
     std_msgs::Float64MultiArray VelMsg;
     for (int i = 0; i < NBJOINTS; i++) {
         double vel = 0;
-        if (i == JointIndex){
-/*             // On verifie la direction demandee
-            if (joy->axes[0] > ThumbDeadzone){
-                AxisDir = 1.0;
-            } else if (joy->axes[0] < -ThumbDeadzone){
-                AxisDir = -1.0;
+        double delta = 0;
+        if (i == JointIndex){ 
+            if (joy->buttons[1]){ //Calcul le delta entre ce qui est demande et la derniere vitesse
+                delta = (joy->axes[0]) * FinessePrecision[i] - LastVel[i];
             } else {
-                AxisDir = 0.0;
+                delta = (joy->axes[0]) * Precision[i] - LastVel[i];
             }
-            // Si B est maintenu la velocite est plus petite
-            if (joy->buttons[1]){
-                vel = (joy->axes[5]-1.0)*0.5 * AxisDir * FinessePrecision;
-                //vel = joy->axes[5];
-            } else {
-                vel = (joy->axes[5]-1.0)*0.5 * AxisDir;
-            } */
-            if (joy->buttons[1]){
-                vel = (joy->axes[0])*0.5 * FinessePrecision;
-                //vel = joy->axes[5];
-            } else {
-                vel = (joy->axes[0])*0.5;
-            }
-
+            // Clamp le delta avec lacceleration
+            delta = std::max(std::min(delta, Acceleration[i]/Rate), -Acceleration[i]/Rate);
+            vel = LastVel[i]+ delta;
         }
+        LastVel[i] = vel;
         VelMsg.data.push_back(vel);
     }
     ArmVelCtrlPub.publish(VelMsg);
@@ -127,12 +74,12 @@ void JointChange(sensor_msgs::JoyPtr joy) {
     // Changement de joint
     if (joy->buttons[5] && !buttonsAlreadyPressed[5]) {
         JointIndex++;
-        if (JointIndex >= NBJOINTS) JointIndex = 0;
+        if (JointIndex > NBJOINTS) JointIndex = NBJOINTS;
         ROS_INFO("Switching to next controlled joint.");
     }
     if (joy->buttons[4] && !buttonsAlreadyPressed[4]) {
         JointIndex--;
-        if (JointIndex < 0) JointIndex = NBJOINTS - 1;
+        if (JointIndex < 0) JointIndex = 0;
         ROS_INFO("Switching to previous controlled joint.");
     }
 }
@@ -140,6 +87,7 @@ void StopArm() {
     std_msgs::Float64MultiArray VelMsg;
     for (int i = 0; i < NBJOINTS; i++) {
         double vel = 0;
+        LastVel[i] = vel;
         VelMsg.data.push_back(vel);
     }
     ArmVelCtrlPub.publish(VelMsg);
@@ -155,6 +103,9 @@ void JoyCB(sensor_msgs::JoyPtr joy) {
     }
     JointChange(joy);
 
+    if (JointIndex == NBJOINTS){
+        HandCtrl(joy);
+    }
     // Si le trigger gauche est a moitie on active le deadamns
     if ((joy->axes[2] > -0.95 && joy->axes[2] < 0.95)){
         armDeadmans = true;
@@ -179,9 +130,8 @@ int main(int argc, char **argv) {
     ROS_INFO("starting publishers");
     // Publishers
     ArmVelCtrlPub = nh.advertise<std_msgs::Float64MultiArray>("capra_arm_velocity_controller/command", 1);
-/*     BaseVelCtrlPub = nh.advertise<geometry_msgs::Twist>("cmd_vel", 1); */
-   /*  HandCtrlPub = nh.advertise<control_msgs::GripperCommandActionGoal>(
-            "/sara_gripper_action_controller/gripper_cmd/goal", 1); */
+    HandCtrlPub = nh.advertise<control_msgs::GripperCommandActionGoal>(
+            "/sara_gripper_action_controller/gripper_cmd/goal", 1);
 
 
     ROS_INFO("starting subscribers");
@@ -213,7 +163,7 @@ int main(int argc, char **argv) {
     // start the loop
     // ROS_INFO("Teleop_is_off. Press both triggers to turn it on.");
 
-    ros::Rate r(15); // Tourne a 15Hz
+    ros::Rate r(Rate); // Tourne a 15Hz
     while(ros::ok()){
         HadCallback = false;
         ros::spinOnce();
