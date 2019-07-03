@@ -18,12 +18,12 @@
 #define NBJOINTS 6
 
 
-//sensor_msgs::JointState CurArmState;
+sensor_msgs::JointState CurArmState;
 ros::Publisher ArmVelCtrlPub;
 bool armDeadmans = false;
 bool HadCallback = false;
 int JointIndex = 0;
-static double FinessePrecision = 0.2;
+static double FinessePrecision = 0.1;
 bool buttonsAlreadyPressed[30] = {false};
 double HandState = 0.1;
 double AxisDir = 0.0;
@@ -33,9 +33,9 @@ static double ThumbDeadzone = 0.3;
 std::string JointNames[NBJOINTS] = {
         "ca_joint1", "ca_joint2", "ca_joint3", "ca_joint4", "ca_joint5", "ca_joint6"};
 
-/* void ArmStateCB(sensor_msgs::JointState State) {
+void ArmStateCB(sensor_msgs::JointState State) {
     CurArmState = State;
-} */
+}
 
 // COMMENTE CAR PAS DE TRAJECTORY POUR CAPRA
 /* void ToggleArmMode() {
@@ -94,8 +94,8 @@ void ArmCtrl(sensor_msgs::JoyPtr joy) {
     std_msgs::Float64MultiArray VelMsg;
     for (int i = 0; i < NBJOINTS; i++) {
         double vel = 0;
-        if (i == JointIndex)
-            // On verifie la direction demandee
+        if (i == JointIndex){
+/*             // On verifie la direction demandee
             if (joy->axes[0] > ThumbDeadzone){
                 AxisDir = 1.0;
             } else if (joy->axes[0] < -ThumbDeadzone){
@@ -105,21 +105,32 @@ void ArmCtrl(sensor_msgs::JoyPtr joy) {
             }
             // Si B est maintenu la velocite est plus petite
             if (joy->buttons[1]){
-                vel = (joy->axes[5] + 1.0 * AxisDir) * 0.5 * FinessePrecision;
+                vel = (joy->axes[5]-1.0)*0.5 * AxisDir * FinessePrecision;
+                //vel = joy->axes[5];
             } else {
-                vel = (joy->axes[5] + 1.0 * AxisDir) * 0.5;
+                vel = (joy->axes[5]-1.0)*0.5 * AxisDir;
+            } */
+            if (joy->buttons[1]){
+                vel = (joy->axes[0])*0.5 * FinessePrecision;
+                //vel = joy->axes[5];
+            } else {
+                vel = (joy->axes[0])*0.5;
             }
+
+        }
         VelMsg.data.push_back(vel);
     }
     ArmVelCtrlPub.publish(VelMsg);
-    
+}
+
+void JointChange(sensor_msgs::JoyPtr joy) {
     // Changement de joint
-    if (joy->buttons[4] && !buttonsAlreadyPressed[4]) {
+    if (joy->buttons[5] && !buttonsAlreadyPressed[5]) {
         JointIndex++;
         if (JointIndex >= NBJOINTS) JointIndex = 0;
         ROS_INFO("Switching to next controlled joint.");
     }
-    if (joy->buttons[5] && !buttonsAlreadyPressed[5]) {
+    if (joy->buttons[4] && !buttonsAlreadyPressed[4]) {
         JointIndex--;
         if (JointIndex < 0) JointIndex = NBJOINTS - 1;
         ROS_INFO("Switching to previous controlled joint.");
@@ -142,8 +153,10 @@ void JoyCB(sensor_msgs::JoyPtr joy) {
     } else {
         StopArm();
     }
+    JointChange(joy);
+
     // Si le trigger gauche est a moitie on active le deadamns
-    if ((joy->axes[2] > -0.5 && joy->axes[2] < 0.5)){
+    if ((joy->axes[2] > -0.95 && joy->axes[2] < 0.95)){
         armDeadmans = true;
     } else {
         armDeadmans = false;
@@ -165,7 +178,7 @@ int main(int argc, char **argv) {
 
     ROS_INFO("starting publishers");
     // Publishers
-    ArmVelCtrlPub = nh.advertise<std_msgs::Float64MultiArray>("sara_arm_velocity_controller/command", 1);
+    ArmVelCtrlPub = nh.advertise<std_msgs::Float64MultiArray>("capra_arm_velocity_controller/command", 1);
 /*     BaseVelCtrlPub = nh.advertise<geometry_msgs::Twist>("cmd_vel", 1); */
    /*  HandCtrlPub = nh.advertise<control_msgs::GripperCommandActionGoal>(
             "/sara_gripper_action_controller/gripper_cmd/goal", 1); */
@@ -173,7 +186,7 @@ int main(int argc, char **argv) {
 
     ROS_INFO("starting subscribers");
     // Subscribers
-    // ros::Subscriber ArmStateSub = nh.subscribe("joint_states", 1, &ArmStateCB);
+    ros::Subscriber ArmStateSub = nh.subscribe("joint_states", 1, &ArmStateCB);
     ros::Subscriber JoySub = nh.subscribe("joy", 1, &JoyCB);
 
     ROS_INFO("starting service clients");
@@ -189,35 +202,18 @@ int main(int argc, char **argv) {
     List.waitForExistence();
     controller_manager_msgs::ListControllers listmsg;
 
-
-/*     do {
-        List.call(listmsg);
-        unsigned long Length1 = listmsg.response.controller.size();
-        for (int i = 0; i < Length1; i++) {
-            if (listmsg.response.controller[i].name == "capra_arm_trajectory_controller") {
-                MyTrajectory.joint_names = listmsg.response.controller[i].claimed_resources[0].resources;
-            }
-        }
-        if (MyTrajectory.joint_names.size() == 0) {
-            sleep(1);
-            continue;
-        } else break;
-
-    } while (true); */
-
     ROS_INFO("loading controllers");
     // Load controllers
-    controller_manager_msgs::LoadController msg;
+/*     controller_manager_msgs::LoadController msg;
     Load.waitForExistence();
     msg.request.name = "capra_arm_velocity_controller";
-    Load.call(msg);
+    Load.call(msg); */
 
 
     // start the loop
     // ROS_INFO("Teleop_is_off. Press both triggers to turn it on.");
-    //ros::spin();
 
-    ros::Rate r(30); // Tourne a 30Hz
+    ros::Rate r(15); // Tourne a 15Hz
     while(ros::ok()){
         HadCallback = false;
         ros::spinOnce();
