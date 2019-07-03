@@ -8,9 +8,7 @@ find_package(catkin REQUIRED COMPONENTS
     roscpp
     controller_manager
     trajectory_msgs
-    wm_trajectory_manager
     message_runtime
-    wm_tts
 )
 
 
@@ -104,7 +102,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
         LIBRARIES sara_teleop
-        CATKIN_DEPENDS roscpp message_runtime wm_tts sara_msgs wm_trajectory_manager
+        CATKIN_DEPENDS roscpp message_runtime
 )
 
 ###########
